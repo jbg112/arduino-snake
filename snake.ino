@@ -1,16 +1,25 @@
 #include "ezButton.h"
 #include "ArduinoGraphics.h"
 #include "Arduino_LED_Matrix.h"
+#include "WiFiS3.h"
+#include "WiFiSSLClient.h"
+#include "ArduinoMqttClient.h"
 #include "secrets.h"
 
 // Arduino Led Matrix
 ArduinoLEDMatrix matrix;
 
-// Pins of the Joystick; up/down, left/right, and press
+// Pins of the Joystick; up/down, left/right, and presssing down
 #define VRX_PIN  A0
 #define VRY_PIN  A1
 #define SW_PIN   2
 ezButton button(SW_PIN);
+
+// Wifi connection variable
+WiFiClient client;
+
+// MQTT connection variable
+MqttClient mqttClient(client); 
 
 // Snake tail variables
 int tailLength = 0;
@@ -19,7 +28,7 @@ const int maxTailLength = 95;
 int tailX[maxTailLength];
 int tailY[maxTailLength];
 
-// Board variables  
+// Board/game variables  
 byte matrixx[8][12];
 int xValue = 0;
 int yValue = 0;
@@ -37,21 +46,50 @@ bool gamePaused = false;
 
 // Score variables
 int score;
+int highscore;
 bool scoreAdded = false;
 
 void setup() {
   Serial.begin(9600);
   button.setDebounceTime(50);
   matrix.begin();
-  matrixx[3][5] = 1;
   matrix.renderBitmap(matrixx, 8, 12);
+
+  // Internet connection
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print("Attempting to connect to SSID: ");
+    Serial.println(WIFI_SSID);
+    // Connect to wifi network
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    delay(2500);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    while (WiFi.gatewayIP() == "0.0.0.0");
+  }
+
+  // Set MQTT username and password
+  mqttClient.setUsernamePassword(MQTT_USERNAME, MQTT_PASSWORD);
+  // Connect to MQTT
+  if (!mqttClient.connect(MQTT_BROKER, MQTT_PORT)) {
+    Serial.print("MQTT connection failed! Error code = ");
+    Serial.println(mqttClient.connectError());
+    while (1);
+  }
+  // define function to execute when getting data
+  mqttClient.onMessage(getHighscore);
+  // Listen to highscore topic for new highscores
+  mqttClient.subscribe("jbtest/highscore", 2);
+  mqttClient.poll();
+  // Set game message to true, signifies game has started
+  sendMQTTmessage("jbtest/gameMessage", "True", false);
 }
 
 void loop() {
   button.loop();
+  // Get MQTT data
+  mqttClient.poll();
   // Check if the pauze button has been pressed to pauze or unpauze the game
   gamePauze();
-
   // If the game is not pauzed
   if (!gamePaused) {
     // Clear the board so it can be drawn again
@@ -97,8 +135,8 @@ void loop() {
     }
     // render the matrix
     matrix.renderBitmap(matrixx, 8, 12);
-    // game update every 100ms
-    delay(100);
+    // game update every 75ms
+    delay(75);
   }
 }
 
@@ -114,22 +152,39 @@ void Reset() {
   directionY = NULL;
   tailLength = 0;
   score = 0;
+
+  // Create new game message
+  sendMQTTmessage("jbtest/gameMessage", "True", false);
 }
 
 void gamePauze() {
-  // Toggle the game pause state when the button is pressed
+  // Toggle the game pauze state when the button is pressed
   if (digitalRead(SW_PIN) == LOW) {
     gamePaused = !gamePaused;
-    if (gamePaused) {
-      Serial.println("Game paused");
-    } else {
-      Serial.println("Game resumed");
-    }
     while (digitalRead(SW_PIN) == LOW) {
-      // Wait for the button to be released
+      // Wait for button to be released
       delay(10);
     }
   }
+}
+
+void sendMQTTmessage(String sendTopic, String sendMessage, bool retained) {
+  // Send to MQTT topic (retained or not)
+  mqttClient.beginMessage(sendTopic, retained);
+  // the message
+  mqttClient.print(sendMessage);
+  mqttClient.endMessage();
+}
+
+void getHighscore(int messageSize) {
+  // On recieving highscore from MQTT onMessage, save it
+  String recievedData;
+  // get mqtt data
+  while (mqttClient.available()) {
+    recievedData += (char)mqttClient.read();
+  }
+  // update local highscore variable (as integer)
+  highscore = recievedData.toInt();
 }
 
 void updateDirection(int xValue, int yValue) {
@@ -164,6 +219,14 @@ void selfCollisionDetection() {
   for (int i = 0; i < tailLength; i++) {
     // check if the head of the snake is in the same position as a tail element
     if (currentpositionX == tailX[i] && currentpositionY == tailY[i]) {
+      // send message signifies game ending
+      sendMQTTmessage("jbtest/gameMessage", "False", false);
+      // Check if new highscore
+      String textToDisplay;
+      if (score > highscore) {
+        // update highscore in mqtt
+        sendMQTTmessage("jbtest/highscore", String(score), true);
+      }
       // Reset the game; clear the board, variables etc
       Reset();
     }
@@ -253,6 +316,8 @@ void foodCollision() {
 void addScore() {
   // add 1 score to total score
   score++;
+  // send current score to MQTT
+  sendMQTTmessage("jbtest/currentScore", String(score), false);
 }
 
 void createTailSegment() {
