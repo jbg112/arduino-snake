@@ -28,7 +28,7 @@ const int maxTailLength = 95;
 int tailX[maxTailLength];
 int tailY[maxTailLength];
 
-// Board/game variables  
+// Board/game variables   
 byte matrixx[8][12];
 int xValue = 0;
 int yValue = 0;
@@ -61,6 +61,8 @@ void setup() {
     Serial.println(WIFI_SSID);
     // Connect to wifi network
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    
+    DrawMatrixText("Con");
     delay(2500);
   }
   if (WiFi.status() == WL_CONNECTED) {
@@ -68,7 +70,7 @@ void setup() {
   }
 
   // Set MQTT username and password
-  mqttClient.setUsernamePassword(MQTT_USERNAME, MQTT_PASSWORD);
+  mqttClient.setUsernamePassword("jbtest", "aaLyMZ6xlpfAYWLp");
   // Connect to MQTT
   if (!mqttClient.connect(MQTT_BROKER, MQTT_PORT)) {
     Serial.print("MQTT connection failed! Error code = ");
@@ -169,9 +171,8 @@ void gamePauze() {
 }
 
 void sendMQTTmessage(String sendTopic, String sendMessage, bool retained) {
-  // Send to MQTT topic (retained or not)
+  // Send to MQTT broker
   mqttClient.beginMessage(sendTopic, retained);
-  // the message
   mqttClient.print(sendMessage);
   mqttClient.endMessage();
 }
@@ -219,14 +220,26 @@ void selfCollisionDetection() {
   for (int i = 0; i < tailLength; i++) {
     // check if the head of the snake is in the same position as a tail element
     if (currentpositionX == tailX[i] && currentpositionY == tailY[i]) {
+      String discordMessage = "Score > " + String(score);
       // send message signifies game ending
       sendMQTTmessage("jbtest/gameMessage", "False", false);
+
       // Check if new highscore
       String textToDisplay;
+      // Display text on the led matrix to show users their score and highscore
       if (score > highscore) {
         // update highscore in mqtt
         sendMQTTmessage("jbtest/highscore", String(score), true);
+        textToDisplay += "NEW HIGHSCORE > ";
+        textToDisplay += score;
+      } else {
+        textToDisplay += "Score > ";
+        textToDisplay += score;
+        textToDisplay += "   Highscore > ";
+        textToDisplay += highscore;
       }
+      // Draw the text
+      DrawMatrixTextMoving(textToDisplay);
       // Reset the game; clear the board, variables etc
       Reset();
     }
@@ -240,6 +253,40 @@ void clearMatrix() {
       matrixx[i][j] = 0;
     }
   }
+}
+
+void DrawMatrixText(String text) {
+  // Convert the text to char so it can be drawn
+  const char* charToDisplay = text.c_str();
+  // Some settings for the text to display
+  // "Draw" the reached score and highscore on the led matrix 
+  matrix.beginDraw();
+  matrix.stroke(0xFFFFFFFF);
+  matrix.textFont(Font_4x6);
+  matrix.beginText(1, 1, 0xFFFFFF);
+  // Text to display
+  matrix.println(charToDisplay);
+  matrix.endText();
+  matrix.endDraw();
+}
+
+void DrawMatrixTextMoving(String text) {
+  // add empty space before and after for readability (and scrolling animation)
+  String TextToDisplay = "     ";
+  TextToDisplay       += text;
+  TextToDisplay       += "     ";
+  // Convert the text to char so it can be drawn
+  const char* charToDisplay = TextToDisplay.c_str();
+  // "Draw" the reached score and highscore on the led matrix 
+  matrix.beginDraw();
+  matrix.stroke(0xFFFFFFFF);
+  matrix.textScrollSpeed(45);
+  matrix.textFont(Font_5x7);
+  matrix.beginText(1, 1, 0xFFFFFF);
+  // Text to display
+  matrix.println(charToDisplay);
+  matrix.endText(SCROLL_LEFT);
+  matrix.endDraw();
 }
 
 bool checkMatrix(int x, int y) {
