@@ -10,10 +10,10 @@
 ArduinoLEDMatrix matrix;
 
 // Pins of the Joystick; up/down, left/right, and presssing down
-#define VRX_PIN  A0
-#define VRY_PIN  A1
-#define SW_PIN   2
-ezButton button(SW_PIN);
+#define JOYSTICK_X_PIN  A0
+#define JOYSTICK_Y_PIN  A1
+#define JOYSTICK_PUSH_PIN   2
+ezButton button(JOYSTICK_PUSH_PIN);
 
 // Wifi connection variable
 WiFiClient client;
@@ -70,7 +70,7 @@ void setup() {
   }
 
   // Set MQTT username and password
-  mqttClient.setUsernamePassword("jbtest", "aaLyMZ6xlpfAYWLp");
+  mqttClient.setUsernamePassword(MQTT_USERNAME, MQTT_PASSWORD);
   // Connect to MQTT
   if (!mqttClient.connect(MQTT_BROKER, MQTT_PORT)) {
     Serial.print("MQTT connection failed! Error code = ");
@@ -82,8 +82,6 @@ void setup() {
   // Listen to highscore topic for new highscores
   mqttClient.subscribe("jbtest/highscore", 2);
   mqttClient.poll();
-  // Set game message to true, signifies game has started
-  sendMQTTmessage("jbtest/gameMessage", "True", false);
 }
 
 void loop() {
@@ -98,8 +96,8 @@ void loop() {
     clearMatrix();
 
     // read analog X and Y values of the joystick
-    xValue = analogRead(VRX_PIN);
-    yValue = analogRead(VRY_PIN);
+    xValue = analogRead(JOYSTICK_X_PIN);
+    yValue = analogRead(JOYSTICK_Y_PIN);
     // Read the joystick button value
     bValue = button.getState();
 
@@ -143,7 +141,7 @@ void loop() {
 }
 
 void Reset() {
-  // This function completely resets the "game state" every aspect of the game is reset
+  // This function completely resets the "game", every aspect of the game is reset
   clearMatrix();
   currentpositionX = 3;
   currentpositionY = 5;
@@ -154,16 +152,13 @@ void Reset() {
   directionY = NULL;
   tailLength = 0;
   score = 0;
-
-  // Create new game message
-  sendMQTTmessage("jbtest/gameMessage", "True", false);
 }
 
 void gamePauze() {
   // Toggle the game pauze state when the button is pressed
-  if (digitalRead(SW_PIN) == LOW) {
+  if (digitalRead(JOYSTICK_PUSH_PIN) == LOW) {
     gamePaused = !gamePaused;
-    while (digitalRead(SW_PIN) == LOW) {
+    while (digitalRead(JOYSTICK_PUSH_PIN) == LOW) {
       // Wait for button to be released
       delay(10);
     }
@@ -189,8 +184,7 @@ void getHighscore(int messageSize) {
 }
 
 void updateDirection(int xValue, int yValue) {
-  // Update the direction of the snake based on joystick input
-  // It checks which direction is being pressed by reading x and y value of the controller
+  // Update the direction of the snake based on joystick x and y input
   // Also checks if the snake is trying to back into itself
   if (xValue > 1020 && directionX != 1) {
     directionX = -1;
@@ -220,13 +214,10 @@ void selfCollisionDetection() {
   for (int i = 0; i < tailLength; i++) {
     // check if the head of the snake is in the same position as a tail element
     if (currentpositionX == tailX[i] && currentpositionY == tailY[i]) {
-      String discordMessage = "Score > " + String(score);
-      // send message signifies game ending
-      sendMQTTmessage("jbtest/gameMessage", "False", false);
-
-      // Check if new highscore
-      String textToDisplay;
       // Display text on the led matrix to show users their score and highscore
+      String discordMessage = "Score > " + String(score);
+      String textToDisplay;
+      // Check if new highscore
       if (score > highscore) {
         // update highscore in mqtt
         sendMQTTmessage("jbtest/highscore", String(score), true);
@@ -271,7 +262,7 @@ void DrawMatrixText(String text) {
 }
 
 void DrawMatrixTextMoving(String text) {
-  // add empty space before and after for readability (and scrolling animation)
+  // add empty space before and after (padding) for readability (and scrolling animation)
   String TextToDisplay = "     ";
   TextToDisplay       += text;
   TextToDisplay       += "     ";
@@ -279,18 +270,23 @@ void DrawMatrixTextMoving(String text) {
   const char* charToDisplay = TextToDisplay.c_str();
   // "Draw" the reached score and highscore on the led matrix 
   matrix.beginDraw();
+  // Color (matrix only supports red)
   matrix.stroke(0xFFFFFFFF);
+  // Text scroll speed
   matrix.textScrollSpeed(45);
+  // Font (width and size) of the text
   matrix.textFont(Font_5x7);
+  // Text displayed at 1 led from the top and left
   matrix.beginText(1, 1, 0xFFFFFF);
   // Text to display
   matrix.println(charToDisplay);
+  // "Scroll" the text from right to left
   matrix.endText(SCROLL_LEFT);
   matrix.endDraw();
 }
 
 bool checkMatrix(int x, int y) {
-  // Check if the given matrix led is off
+  // return if the given matrix led is off
   if (matrixx[x][y] == 0) {
     return true;
   } else {
@@ -338,7 +334,8 @@ void createFood() {
       foodYpos = randomY;
       matrixx[randomX][randomY] = 1;
       foodExists = true;
-      break; // exit loop when spot found
+      // exit loop when spot found
+      break;
     }
   } while (true); // continue until a empty spot is found (not already occupied by the snake)
 }
