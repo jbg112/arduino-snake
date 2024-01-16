@@ -61,12 +61,9 @@ void setup() {
     Serial.println(WIFI_SSID);
     // Connect to wifi network
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    
+    // Draw on matrix to display connecting in progress
     DrawMatrixText("Con");
     delay(2500);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    while (WiFi.gatewayIP() == "0.0.0.0");
   }
 
   // Set MQTT username and password
